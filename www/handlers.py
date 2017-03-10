@@ -1,6 +1,7 @@
 from coroweb import get, post
 from aiohttp import web
-from models import User
+from models import User, Blog, Comment
+import time
 @get('/blog')
 async def handler_url_blog(request):
     body='<h1>Awesome: /blog</h1>'
@@ -38,7 +39,7 @@ def index(request):
         Blog(id='3', name='Learn Swift', summary=summary, created_at=time.time()-7200)
     ]
     return {
-        '__template__': 'blogs.html',
+        '__template__': 'blog.html',
         'blogs': blogs
     }
 
