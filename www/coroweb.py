@@ -12,6 +12,7 @@ import logging
 import os
 from urllib import parse
 from aiohttp import web
+from apis import APIError
 #from apis import APIError   显示不存在
 
 
@@ -97,11 +98,10 @@ class RequestHandler(object):  # 初始化一个请求处理类
                     return web.HTTPBadRequest(text='Missing argument: %s' % arg.name)
 
         logging.info('call with args: %s' % kw)
-        return await self._func(**kw)
-        # try:
-        #     return await self._func(**kw) #给处理URL的函数进行传参
-        # except APIError as e:
-        #     return dict(error=e.error, data=e.data, message=e.message)
+        try:
+            return await self._func(**kw) #给处理URL的函数进行传参
+        except APIError as e:
+            return dict(error=e.error, data=e.data, message=e.message)
 
 
 

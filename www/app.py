@@ -17,7 +17,9 @@ from jinja2 import Environment, FileSystemLoader
 
 import orm
 from coroweb import add_routes, add_static, data_factory
-
+from config import configs
+from handlers import cookie2user, COOKIE_NAME
+#模板渲染
 def init_jinja2(app, **kw):
     logging.info('init jinja2...')
     options = dict(
@@ -32,10 +34,8 @@ def init_jinja2(app, **kw):
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
     logging.info('set jinja2 template path: %s' % path)
-    env = Environment(loader=FileSystemLoader(path), **options)
-    #print(env)
+    env = Environment(loader=FileSystemLoader(path), **options) #这个地方时设置jinja2环境变量吗？
     filters = kw.get('filters', None)
-    #print(filters)
     if filters is not None:
         for name, f in filters.items():
             env.filters[name] = f
@@ -45,8 +45,26 @@ async def logger_factory(app, handler):
     async def logger(request):
         logging.info('Request: %s %s' % (request.method, request.path))
         # await asyncio.sleep(0.3)
-        return (await handler(request))
+        return (await handler(request))  #returm a new handler
     return logger
+
+@asyncio.coroutine
+def auth_factory(app, handler):
+    @asyncio.coroutine
+    def auth(request):
+        logging.info('check user: %s %s' % (request.method, request.path))
+        request.__user__ = None
+        cookie_str = request.cookies.get(COOKIE_NAME)
+        if cookie_str:
+            user = yield from cookie2user(cookie_str)
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user
+                print('6666666666666666666666666', request.__user__)
+        if request.path.startswith('/manage/') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return (yield from handler(request))
+    return auth
 
 # async def data_factory(app, handler):
 #     async def parse_data(request):
@@ -76,14 +94,14 @@ async def response_factory(app, handler):
             resp = web.Response(body=r.encode('utf-8'))
             resp.content_type = 'text/html;charset=utf-8'
             return resp
-        if isinstance(r, dict):
-            template = r.get('__template__')
+        if isinstance(r, dict):  #返回dict，里面对应的渲染模板
+            template = r.get('__template__')  #获取需要渲染的模板
             if template is None:
                 resp = web.Response(body=json.dumps(r, ensure_ascii=False, default=lambda o: o.__dict__).encode('utf-8'))
                 resp.content_type = 'application/json;charset=utf-8'
                 return resp
             else:
-                resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
+                resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8')) #这个地方有jinja2模板的渲染
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
         if isinstance(r, int) and r >= 100 and r < 600:
@@ -112,16 +130,16 @@ def datetime_filter(t):
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 async def init(loop):
-    await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='root', password='Limin123?', db='awesome')
-    app = web.Application(loop=loop, middlewares=[response_factory, data_factory, logger_factory])   #这条语句在这里干了什么事情
+    await orm.create_pool(loop=loop, **configs.db)
+    app = web.Application(loop=loop, middlewares=[response_factory, data_factory, logger_factory, auth_factory])   #这条语句在这里干了什么事情
     init_jinja2(app, filters=dict(datetime=datetime_filter))
     add_routes(app, 'handlers') #对处理URL请求的函数进行注册
-    #print('========')
     add_static(app)
     srv = await loop.create_server(app.make_handler(), '127.0.0.1', 9000)
     logging.info('server started at http://127.0.0.1:9000...')
     print('==================================================')
     #print(dir(app))
+
     #print(dir(web.Application))
     #await destroy_pool()  #关闭pool
     return srv

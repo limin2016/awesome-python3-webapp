@@ -36,8 +36,8 @@ def destroy_pool():
         __pool.close()  #关闭进程池,The method is not a coroutine,就是说close()不是一个协程，所有不用yield from
         yield from __pool.wait_closed() #但是wait_close()是一个协程，所以要用yield from,到底哪些函数是协程，上面Pool的链接中都有
  
-# 我很好奇为啥不用commit 事务不用提交么？我觉得是因为上面再创建进程池的时候，有一个参数autocommit=kw.get('autocommit',True)
-# 意思是默认会自动提交事务
+
+#select 函数中连接了数据库连接池
 @asyncio.coroutine
 def select(sql, args, size=None):
     log(sql,args)
@@ -62,6 +62,7 @@ def select(sql, args, size=None):
 # 返回操作影响的行号
 # 我想说的是 知道影响行号有个叼用
  
+ #execute函数中连接了数据库连接池
 @asyncio.coroutine
 def execute(sql,args, autocommit=True):
     log(sql)
@@ -105,7 +106,7 @@ class StringField(Field):
         super().__init__(name,ddl,primary_key,default)
 # 布尔类型不可以作为主键
 class BooleanField(Field):
-    def __init__(self, name=None, default=False):
+    def __init__(self, name=None, default=True):
         super().__init__(name,'Boolean',False, default)
 # 不知道这个column type是否可以自己定义 先自己定义看一下
 class IntegerField(Field):
@@ -278,19 +279,31 @@ class Model(dict,metaclass=ModelMetaclass):
  
     @classmethod
     @asyncio.coroutine
-    def findAll(cls, **kw):
-        rs = []
-        if len(kw) == 0:
-            rs = yield from select(cls.__select__, None)
-        else:
-            args=[]
-            values=[]
-            for k, v in kw.items():
-                args.append('%s=?' % k )
-                values.append(v)
-            print('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
-            rs = yield from select('%s where %s ' % (cls.__select__,  ' and '.join(args)), values)
-        return rs
+    def findAll(cls, where=None, args=None, **kw):
+        ' find objects by where clause. '
+        sql = [cls.__select__]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        if args is None:
+            args = []
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('order by')
+            sql.append(orderBy)
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) == 2:
+                sql.append('?, ?')
+                args.extend(limit)
+            else:
+                raise ValueError('Invalid limit value: %s' % str(limit))
+        rs = yield from select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
     
     @asyncio.coroutine
     def save(self):
@@ -313,7 +326,7 @@ class Model(dict,metaclass=ModelMetaclass):
             logging.warning('failed to update record: affected rows: %s'%rows)
  
     @asyncio.coroutine
-    def delete(self):
+    def remove(self):
         args = [self.getValue(self.__primary_key__)]
         rows = yield from execute(self.__delete__, args)
         if rows != 1:
